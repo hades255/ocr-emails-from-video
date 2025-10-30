@@ -1,0 +1,9 @@
+opencv-python
+Pillow
+paddleocr==2.7.0.3
+paddlepaddle==3.1.1
+paddlex==3.0.2
+rapidfuzz
+email-validator
+imagehash
+pandas

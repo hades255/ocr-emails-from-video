@@ -1,0 +1,13 @@
+__pycache__
+venv
+venvgpu
+frames
+frames_extracted
+normalizing
+ticket
+*.json
+*.csv
+*.mp4
+*.webm
+
+*test*
