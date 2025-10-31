@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  email_extractor:
+    build: .
+    container_name: email_extractor
+    volumes:
+      - ./:/app
+    environment:
+      - FRAME_FPS=10
+    command: python main-gpu.py

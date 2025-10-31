@@ -10,7 +10,6 @@ from rapidfuzz import fuzz
 from email_validator import validate_email, EmailNotValidError
 import json
 from datetime import datetime
-from image_normalizer import ImageNormalizer
 
 
 VIDEO_PATH = "Screencast from 2025-10-16 15-16-43.webm"
@@ -68,13 +67,13 @@ def unique_frames(frames_dir):
     frames = sorted([f for f in os.listdir(frames_dir) if f.endswith(".png")])
     unique = []
     for fname in frames:
-        # path = os.path.join(frames_dir, fname)
-        # img = Image.open(path)
-        # phash = imagehash.phash(img)
-        # if all(phash - h > PHASH_THRESHOLD for h in hashes):
-            # hashes.append(phash)
-            # unique.append(fname)
-        unique.append(fname)
+        path = os.path.join(frames_dir, fname)
+        img = Image.open(path)
+        phash = imagehash.phash(img)
+        if all(phash - h > PHASH_THRESHOLD for h in hashes):
+            hashes.append(phash)
+            unique.append(fname)
+        # unique.append(fname)
     return unique
 
 
