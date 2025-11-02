@@ -229,7 +229,7 @@ class VideoProcessor:
             )
 
             lines = out.decode("utf-8").strip().splitlines()
-            frees = [int(l.strip()) for l in lines if l.strip().isdigit()]
+            frees = [int(_l.strip()) for _l in lines if _l.strip().isdigit()]
             if not frees:
                 return None
 
