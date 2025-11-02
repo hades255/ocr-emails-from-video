@@ -7,14 +7,15 @@ import imagehash
 from paddleocr import PaddleOCR
 import pandas as pd
 from rapidfuzz import fuzz
-from email_validator import validate_email, EmailNotValidError
 import json
 from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 VIDEO_PATH = "Screencast from 2025-10-16 15-16-43.webm"
 FRAMES_DIR = "frames"
-FRAME_FPS = 10
+FRAME_FPS = 5
 EMAIL_REGEX = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
 PHASH_THRESHOLD = 3
 DEDUP_RATIO = 96
@@ -46,6 +47,37 @@ KNOWN_DOMAINS = [
 DOMAIN_CORRECTION_THRESHOLD = 90
 
 
+def show_image(title, img, cmap="gray", export=False, show=False, ocr_res=None):
+    if ocr_res and len(ocr_res) and ocr_res[0] is not None:
+        for line in ocr_res[0]:
+            box, (text, conf) = line
+            box = np.array(box).astype(int)
+
+            cv2.polylines(img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
+
+            if re.search(EMAIL_REGEX, text):
+                x, y = int(box[0][0]), int(box[0][1]) - 5
+                cv2.putText(
+                    img,
+                    f"{text}-{conf:.3f}",
+                    (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+    if export and title:
+        cv2.imwrite(title, img)
+    if show:
+        plt.figure(figsize=(8, 6))
+        plt.title(title)
+        plt.imshow(img, cmap=cmap)
+        plt.axis("off")
+        plt.show()
+
+
 def extract_frames(video_path, frames_dir, fps):
     if not os.path.exists(frames_dir):
         os.makedirs(frames_dir)
@@ -73,7 +105,6 @@ def unique_frames(frames_dir):
         if all(phash - h > PHASH_THRESHOLD for h in hashes):
             hashes.append(phash)
             unique.append(fname)
-        # unique.append(fname)
     return unique
 
 
@@ -84,9 +115,17 @@ def crop_roi(image, roi=None):
     return image[y0:y1, x0:x1]
 
 
+def keep_dark_regions(img, threshold=200):
+    img = np.asarray(img, dtype=np.uint8)
+    mask = np.all(img < threshold, axis=2)
+    result = np.ones_like(img) * 255
+    result[mask] = img[mask]
+    return result
+
+
 def extract_emails_from_frames(frames_dir, unique_frames, roi=None):
+    ocr = None
     ocr = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=True, show_log=True)
-    # normalizer = ImageNormalizer()
     results = []
 
     for idx, fname in enumerate(unique_frames):
@@ -94,26 +133,25 @@ def extract_emails_from_frames(frames_dir, unique_frames, roi=None):
         img_cv = cv2.imread(path)
         if roi:
             img_cv = crop_roi(img_cv, roi)
-        # image = normalizer.normalize_image(img_cv)
-        # img_pil = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+        img_cv = keep_dark_regions(img_cv)
 
-        ocr_res = ocr.ocr(path, cls=True)
-        frame_text = " ".join([line[1][0] for line in ocr_res[0] if line[1][1] > 0.5])
+        ocr_res = ocr.ocr(img_cv, cls=True)
+        show_image(f"frames-out/{fname}", img_cv, export=True, ocr_res=ocr_res)
 
-        for email in re.findall(EMAIL_REGEX, frame_text):
-            try:
-                # _ = validate_email(email)
-                conf = [line[1][1] for line in ocr_res[0] if email in line[1][0]]
+        for line in ocr_res[0]:
+            box, (text, conf) = line
+            emails = re.findall(EMAIL_REGEX, text)
+            for email in emails:
+                email = email.replace("I", "l")
                 results.append(
                     {
-                        "email": email,
+                        "email": email.strip(),
                         "frame": fname,
-                        "conf": sum(conf) / len(conf) if conf else 0.5,
+                        "conf": conf,
                         "sec": idx / FRAME_FPS,
+                        "box": box,
                     }
                 )
-            except EmailNotValidError:
-                continue
     return results
 
 

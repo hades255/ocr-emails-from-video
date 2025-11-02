@@ -48,3 +48,14 @@ This project focuses on extracting email addresses from CRM-recording videos and
 ```
 pip install "paddleocr==2.7.0.3" "paddlepaddle-gpu==2.6.2" "opencv-python==4.10.0.84" "shapely==2.0.5" "pyclipper==1.3.0.post5"
 ```
+
+- easyocr
+
+```
+pip install numpy==1.26.4
+pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu118
+pip install easyocr==1.7.2
+
+pip cache purge
+pip install numpy==1.26.4 --force-reinstall
+```

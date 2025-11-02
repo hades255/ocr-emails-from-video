@@ -1,6 +1,10 @@
 __pycache__
 venv
 venvgpu
+venveasy
+venvkeras
+
+frames-out
 frames
 frames_extracted
 normalizing
