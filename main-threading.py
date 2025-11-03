@@ -344,7 +344,6 @@ class VideoProcessor:
             ocr_res = ocr.ocr(img_cv, cls=True)
             if not ocr_res or not ocr_res[0]:
                 continue
-            show_image(f"frames-out/{fname}", img_cv, export=True)
 
             for line in ocr_res[0]:
                 box, (text, conf) = line
@@ -633,16 +632,12 @@ class VideoProcessor:
         return deduped
 
 
-# ------------------ Example usage ------------------
-
 if __name__ == "__main__":
     processor = VideoProcessor(
         video_path="Screencast from 2025-10-16 15-16-43.webm",
         frame_fps=10,
         use_gpu=True,
         roi=None,
-        keep_frames=True,
-        frames_dir="frames",
         phash_threshold=0,
         local_part_ratio=90,
         domain_part_ratio=70,
