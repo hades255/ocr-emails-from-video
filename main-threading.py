@@ -494,15 +494,12 @@ class VideoProcessor:
             subprocess.run(
                 [
                     "ffmpeg",
-                    "-y",
-                    "-ss",
-                    str(start),
                     "-i",
                     video_path,
+                    "-ss",
+                    str(start),
                     "-t",
                     str(segment_seconds),
-                    "-c",
-                    "copy",
                     seg_path,
                 ],
                 check=True,
