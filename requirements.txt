@@ -1,6 +1,18 @@
-opencv-python
-Pillow
+numpy==1.26.4
 
+# Core dependencies
+opencv-python==4.6.0.66
+Pillow
+pandas
+tqdm
+rapidfuzz
+Levenshtein
+email-validator
+imagehash
+shapely==2.0.5
+pyclipper==1.3.0.post5
+
+# PaddleOCR GPU (exact versions)
 # for cpu
 # paddleocr==2.7.0.3
 # paddlepaddle==3.1.1
@@ -8,13 +20,4 @@ Pillow
 # for gpu
 paddleocr==2.7.0.3
 paddlepaddle-gpu==2.6.2
-opencv-python==4.10.0.84
 # paddle ocr option, should keep exact versions
-
-pyclipper==1.3.0.post5
-shapely==2.0.5
-rapidfuzz
-email-validator
-imagehash
-pandas
-tqdm

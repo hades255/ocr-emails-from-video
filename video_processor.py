@@ -8,6 +8,7 @@ import math
 import tempfile
 import json
 import imagehash
+import Levenshtein
 import numpy as np
 import pandas as pd
 import multiprocessing
@@ -126,6 +127,10 @@ class VideoProcessor:
 
     GPU_RESERVE_MB = 500
 
+    LEVENSHTEIN_SIM_THRESHOLD = 0.9
+
+    IS_LOWER_CASE = False
+
     HIGH_CONFIDENCE_REPLACEMENTS = {
         "qmail.com": "gmail.com",
         "hotmall.com": "hotmail.com",
@@ -146,6 +151,11 @@ class VideoProcessor:
         "msn.com",
         "gmx.com",
         "mail.com",
+        "company.org",
+        "example.com",
+        "company.org",
+        "project.net",
+        "data.io",
     ]
 
     def __init__(
@@ -154,6 +164,7 @@ class VideoProcessor:
         frames_dir=None,
         frame_fps: int = None,
         use_gpu: bool = True,
+        is_lower_case: bool = True,
         roi: tuple = None,
         keep_frames: bool = False,
         phash_threshold: int = None,
@@ -169,6 +180,7 @@ class VideoProcessor:
         self.frames_dir = frames_dir or ""
         self.frame_fps = frame_fps or self.DEFAULT_FRAME_FPS
         self.use_gpu = use_gpu
+        self.is_lower_case = is_lower_case or self.IS_LOWER_CASE
         self.roi = roi
         self.keep_frames = keep_frames
         self.phash_threshold = phash_threshold or self.DEFAULT_PHASH_THRESHOLD
@@ -282,6 +294,7 @@ class VideoProcessor:
 
         hashes = []
         unique = []
+
         for fname in tqdm(frames, desc="Filtering unique frames"):
             path = os.path.join(frames_dir, fname)
             with Image.open(path) as img:
@@ -325,6 +338,21 @@ class VideoProcessor:
         result[mask] = np.stack([gray[mask]] * 3, axis=-1)
         return result
 
+    def _has_invalid_special_chars_for_email(self, text):
+        pattern = r"[^a-zA-Z0-9@._+\-\s]"
+        return bool(re.search(pattern, text))
+
+    def _validate_email_from_ocr(self, email):
+        if not email:
+            return None
+        if email[0].isdigit() or not email[0].isalpha():
+            return None
+        if self.is_lower_case:
+            email = email.replace("I", "l")
+            if email[0].isupper():
+                return None
+        return email
+
     def _extract_emails_from_frames(self, frames_dir, unique_frames):
         ocr = None
         ocr = PaddleOCR(
@@ -339,26 +367,31 @@ class VideoProcessor:
                 continue
             if self.roi:
                 img_cv = self._crop_roi(img_cv)
-            img_cv = self._keep_dark_regions(img_cv)
+            img_cv = self._keep_dark_regions(img_cv, threshold=250)
 
             ocr_res = ocr.ocr(img_cv, cls=True)
             if not ocr_res or not ocr_res[0]:
                 continue
 
+            # show_image(f"frames-out/{fname}", img_cv, export=True, ocr_res=ocr_res)
+
             for line in ocr_res[0]:
                 box, (text, conf) = line
+                if self._has_invalid_special_chars_for_email(text):
+                    continue
                 emails = re.findall(EMAIL_REGEX, text)
                 for email in emails:
-                    email = email.replace("I", "l")
-                    results.append(
-                        {
-                            "email": email.strip(),
-                            "frame": fname,
-                            "conf": conf,
-                            "sec": idx / self.frame_fps,
-                            "box": box,
-                        }
-                    )
+                    email = self._validate_email_from_ocr(email)
+                    if email:
+                        results.append(
+                            {
+                                "email": email.strip(),
+                                "frame": fname,
+                                "conf": conf,
+                                "sec": idx / self.frame_fps,
+                                "box": box,
+                            }
+                        )
 
         return results
 
@@ -407,19 +440,31 @@ class VideoProcessor:
 
             found = False
             for existing in list(emails.keys()):
-                existing_local, existing_domain = split_email(existing)
-                local_match = fuzz.ratio(local, existing_local) >= self.local_part_ratio
-                domain_match = (
-                    fuzz.ratio(domain, existing_domain) >= self.domain_part_ratio
-                )
-                if local_match and domain_match:
+                distance = Levenshtein.distance(email.lower(), existing.lower())
+                max_len = max(len(email), len(existing))
+                similarity = 1 - distance / max_len
+
+                if similarity == 1.0:
                     group = emails[existing]
                     group["frames_seen"].add(entry["frame"])
                     group["confidences"].append(entry["conf"])
                     group["last_seen_sec"] = max(group["last_seen_sec"], entry["sec"])
                     group["first_seen_sec"] = min(group["first_seen_sec"], entry["sec"])
-                    group["sample_frame"] = group.get("sample_frame", entry["frame"])
-                    group["box"] = group.get("box", entry["box"])
+                    found = True
+                    break
+
+                elif similarity >= self.LEVENSHTEIN_SIM_THRESHOLD:
+                    emails[email] = {
+                        "frames_seen": {entry["frame"]},
+                        "confidences": [entry["conf"]],
+                        "first_seen_sec": entry["sec"],
+                        "last_seen_sec": entry["sec"],
+                        "sample_frame": entry["frame"],
+                        "box": entry["box"],
+                        "is_duplicate": True,
+                        "duplicate_of": existing,
+                        "similarity": similarity,
+                    }
                     found = True
                     break
 
@@ -431,26 +476,63 @@ class VideoProcessor:
                     "last_seen_sec": entry["sec"],
                     "sample_frame": entry["frame"],
                     "box": entry["box"],
+                    "is_duplicate": False,
+                    "duplicate_of": None,
+                    "similarity": 1.0,
                 }
 
-        final = []
+        clusters = []
+        used = set()
+
         for email, data in emails.items():
-            mean_conf = (
-                sum(data["confidences"]) / len(data["confidences"])
-                if data["confidences"]
-                else 0.0
+            if email in used:
+                continue
+
+            cluster = [email]
+            for other, odata in emails.items():
+                if other != email and other not in used:
+                    dist = Levenshtein.distance(email.lower(), other.lower())
+                    sim = 1 - dist / max(len(email), len(other))
+                    if sim >= self.LEVENSHTEIN_SIM_THRESHOLD:
+                        cluster.append(other)
+
+            used.update(cluster)
+            clusters.append(cluster)
+
+        final = []
+        for cluster in clusters:
+            best_email = max(
+                cluster,
+                key=lambda e: (
+                    sum(emails[e]["confidences"]) / len(emails[e]["confidences"]),
+                    len(emails[e]["frames_seen"]),
+                    len(e),
+                ),
             )
-            final.append(
-                {
-                    "email": email,
-                    "frames_seen": len(data["frames_seen"]),
-                    "mean_conf": mean_conf,
-                    "first_seen_sec": data["first_seen_sec"],
-                    "last_seen_sec": data["last_seen_sec"],
-                    "sample_frame": data["sample_frame"],
-                    "box": data["box"],
-                }
-            )
+
+            for e in cluster:
+                data = emails[e]
+                mean_conf = (
+                    sum(data["confidences"]) / len(data["confidences"])
+                    if data["confidences"]
+                    else 0.0
+                )
+
+                final.append(
+                    {
+                        "email": e,
+                        "frames_seen": len(data["frames_seen"]),
+                        "mean_conf": mean_conf,
+                        "first_seen_sec": data["first_seen_sec"],
+                        "last_seen_sec": data["last_seen_sec"],
+                        "sample_frame": data["sample_frame"],
+                        "box": data["box"],
+                        "is_duplicate": e != best_email,
+                        "duplicate_of": None if e == best_email else best_email,
+                        "similarity": data["similarity"],
+                    }
+                )
+
         return final
 
     def _save_to_csv(self, records, filename, video_name):
@@ -542,6 +624,66 @@ class VideoProcessor:
             shutil.rmtree(seg_frames_dir, ignore_errors=True)
         return raw_results
 
+    def _finalize_deduplicated_emails(self, combined):
+        finalized = []
+        for entry in combined:
+            email = entry.get("email", "").strip()
+            if not email:
+                continue
+
+            try:
+                local, full_domain = email.rsplit("@", 1)
+            except ValueError:
+                continue
+
+            normalized_domain = self._normalize_domain(full_domain)
+            normalized_email = f"{local}@{normalized_domain}"
+
+            frames_seen = int(entry.get("frames_seen", 1))
+            mean_conf = float(entry.get("mean_conf", 0.0))
+            first_sec = float(entry.get("first_seen_sec", 0.0))
+            last_sec = float(entry.get("last_seen_sec", first_sec))
+
+            finalized.append(
+                {
+                    "email": normalized_email,
+                    "frames_seen": frames_seen,
+                    "mean_conf": round(mean_conf, 3),
+                    "first_seen_sec": first_sec,
+                    "last_seen_sec": last_sec,
+                    "sample_frame": entry.get("sample_frame"),
+                    "is_duplicate": bool(entry.get("is_duplicate")),
+                    "duplicate_of": entry.get("duplicate_of"),
+                    "similarity": round(entry.get("similarity", 1.0), 3),
+                    "box": entry.get("box"),
+                }
+            )
+
+        finalized.sort(key=lambda x: x["first_seen_sec"])
+
+        unique = []
+        seen = set()
+        for item in finalized:
+            email_key = item["email"].lower()
+            if email_key not in seen:
+                seen.add(email_key)
+                unique.append(item)
+
+        return unique
+
+    def _combine_segment_results(self, all_segment_results):
+        if not all_segment_results:
+            return []
+
+        combined = []
+        for seg_result in all_segment_results:
+            combined.extend(seg_result)
+
+        combined.sort(key=lambda x: x.get("first_seen_sec", 0))
+
+        final_deduped = self._finalize_deduplicated_emails(combined)
+        return final_deduped
+
     def run(self):
         video_name = os.path.basename(self.video_path)
         print(f"--- Processing {video_name} ---")
@@ -554,13 +696,15 @@ class VideoProcessor:
         print(f"video length: {duration}s")
 
         segment_seconds = self.max_segment_seconds
+        all_segment_deduped = []
         if duration is None or duration <= segment_seconds:
             temp_root = tempfile.mkdtemp(prefix="vp_single_")
             try:
                 raw = self._process_segment_return_raw(self.video_path, 0, temp_root)
+                seg_deduped = self._deduplicate_emails(raw)
+                all_segment_deduped.append(seg_deduped)
             finally:
                 shutil.rmtree(temp_root, ignore_errors=True)
-            combined_raw = raw
         else:
             print(
                 f"Video duration: {duration:.1f}s, splitting into {segment_seconds}s segments."
@@ -581,27 +725,29 @@ class VideoProcessor:
                 )
 
                 temp_root = tempfile.mkdtemp(prefix="vp_seg_frames_")
-                all_raw = []
 
                 with ThreadPoolExecutor(max_workers=worker_count) as ex:
-                    futures = []
-                    for idx, seg in enumerate(segment_files):
-                        futures.append(
-                            ex.submit(
-                                self._process_segment_return_raw, seg, idx, temp_root
-                            )
-                        )
+                    futures = {
+                        ex.submit(
+                            self._process_segment_return_raw, seg, idx, temp_root
+                        ): idx
+                        for idx, seg in enumerate(segment_files)
+                    }
 
                     for fut in tqdm(
                         as_completed(futures), total=len(futures), desc="Segments done"
                     ):
+                        seg_index = futures[fut]
                         try:
-                            partial = fut.result()
-                            all_raw.extend(partial)
+                            raw = fut.result()
+                            seg_deduped = self._deduplicate_emails(raw)
+                            all_segment_deduped.append(seg_deduped)
+                            print(
+                                f"Segment {seg_index} deduplicated ({len(seg_deduped)} emails)."
+                            )
                         except Exception as e:
-                            print("Segment processing error:", str(e))
+                            print(f"Segment {seg_index} processing error:", str(e))
 
-                combined_raw = all_raw
             finally:
                 shutil.rmtree(segments_dir, ignore_errors=True)
                 try:
@@ -609,16 +755,13 @@ class VideoProcessor:
                 except Exception:
                     pass
 
-        print(
-            f"Collected {len(combined_raw)} raw candidate email instances across segments."
-        )
-        print("Deduplicating globally...")
-        deduped = self._deduplicate_emails(combined_raw)
-        print(f"{len(deduped)} unique emails after deduplication.")
+        print("Combining all segment results and final global deduplication...")
+        final_results = self._combine_segment_results(all_segment_deduped)
+        print(f"{len(final_results)} unique emails after final deduplication.")
 
         print("Saving outputs...")
-        self._save_to_csv(deduped, self.csv_file, video_name)
-        self._save_to_json(deduped, self.json_file)
+        # self._save_to_csv(final_results, self.csv_file, video_name)
+        # self._save_to_json(final_results, self.json_file)
 
         if os.path.exists(self.frames_dir) and not self.keep_frames:
             try:
@@ -629,19 +772,20 @@ class VideoProcessor:
         end_time = datetime.datetime.now()
         print("Done. Outputs:", self.csv_file, self.json_file)
         print("start:", start_time, "end:", end_time, "elapsed:", end_time - start_time)
-        return deduped
+        return final_results
 
 
 if __name__ == "__main__":
     processor = VideoProcessor(
-        video_path="Screencast from 2025-10-16 15-16-43.webm",
+        video_path="recording3.webm",
         frame_fps=10,
         use_gpu=True,
+        is_lower_case=True,
         roi=None,
         phash_threshold=0,
         local_part_ratio=90,
         domain_part_ratio=70,
-        domain_correction_threshold=90,
+        domain_correction_threshold=80,
         max_segment_seconds=300,
         gpu_per_ocr_mb=600,
     )

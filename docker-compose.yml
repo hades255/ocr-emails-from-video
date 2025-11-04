@@ -1,11 +1,20 @@
-version: "3.8"
+version: "3.9"
 
 services:
-  email_extractor:
+  ocr_app:
     build: .
-    container_name: email_extractor
-    volumes:
-      - ./:/app
+    container_name: ocr_app
+    image: ocr-app:latest
+    command: python main.py video.mp4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    runtime: nvidia
     environment:
-      - FRAME_FPS=10
-    command: python main-gpu.py
+      - NVIDIA_VISIBLE_DEVICES=all
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app
+      - ./outputs:/app/outputs
