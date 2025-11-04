@@ -759,7 +759,7 @@ class VideoProcessor:
         final_results = self._combine_segment_results(all_segment_deduped)
         print(f"{len(final_results)} unique emails after final deduplication.")
 
-        print("Saving outputs...")
+        # print("Saving outputs...")
         # self._save_to_csv(final_results, self.csv_file, video_name)
         # self._save_to_json(final_results, self.json_file)
 
@@ -770,7 +770,7 @@ class VideoProcessor:
                 pass
 
         end_time = datetime.datetime.now()
-        print("Done. Outputs:", self.csv_file, self.json_file)
+        # print("Done. Outputs:", self.csv_file, self.json_file)
         print("start:", start_time, "end:", end_time, "elapsed:", end_time - start_time)
         return final_results
 
