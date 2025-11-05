@@ -1,20 +1,25 @@
-version: "3.9"
-
 services:
   ocr_app:
     build: .
     container_name: ocr_app
     image: ocr-app:latest
-    command: python main.py video.mp4
+    command: python3 main.py video.mp4
     deploy:
       resources:
         reservations:
           devices:
             - capabilities: [gpu]
+    shm_size: "8gb"
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=0,1,2
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - FLAGS_selected_gpus=0,1,2
+      - FLAGS_use_nccl=False
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
     volumes:
       - .:/app
       - ./outputs:/app/outputs

@@ -1,8 +1,10 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV TZ=Asia/Seoul
+ENV TZ=Etc/UTC
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+ENV CUDA_HOME=/usr/local/cuda
 
 RUN apt-get update && apt-get install -y \
     python3 python3-pip python3-dev git ffmpeg \

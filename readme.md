@@ -124,6 +124,12 @@ Expected:
 gpu:0
 ```
 
+_Delete Docker container_
+
+```powershell
+docker compose down
+```
+
 ---
 
 ## Technical Approach
