@@ -12,13 +12,12 @@ services:
     shm_size: "8gb"
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
       - PYTHONUNBUFFERED=1
       - NVIDIA_VISIBLE_DEVICES=0,1,2
       - CUDA_VISIBLE_DEVICES=0,1,2
       - FLAGS_selected_gpus=0,1,2
       - FLAGS_use_nccl=False
-      - OMP_NUM_THREADS=4
+      - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=4
     volumes:
       - .:/app

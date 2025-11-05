@@ -81,7 +81,7 @@ docker run --rm --gpus all nvidia/cuda:11.8.0-base nvidia-smi
 3. Run it:
 
    ```powershell
-   docker compose run --rm ocr_app python main.py recording3.webm
+   docker compose run --rm ocr_app python3 main.py recording3.webm
    ```
 
 ---
