@@ -123,13 +123,15 @@ class VideoProcessor:
 
     DEFAULT_MAX_SEGMENT_SECONDS = 300
 
-    DEFAULT_GPU_PER_OCR_MB = 600
+    DEFAULT_GPU_PER_OCR_MB = 700
 
-    GPU_RESERVE_MB = 500
+    GPU_RESERVE_MB = 800
 
     LEVENSHTEIN_SIM_THRESHOLD = 0.9
 
     IS_LOWER_CASE = False
+
+    FRAME_EXT = "jpg"
 
     HIGH_CONFIDENCE_REPLACEMENTS = {
         "qmail.com": "gmail.com",
@@ -176,6 +178,7 @@ class VideoProcessor:
         high_confidence_replacements: dict = None,
         known_domains: list = None,
     ):
+        print("Initializing VideoProcessor...", datetime.datetime.now())
         self.video_path = video_path
         self.frames_dir = frames_dir or ""
         self.frame_fps = frame_fps or self.DEFAULT_FRAME_FPS
@@ -198,10 +201,6 @@ class VideoProcessor:
             high_confidence_replacements or self.HIGH_CONFIDENCE_REPLACEMENTS
         )
         self.known_domains = known_domains or list(self.KNOWN_DOMAINS)
-
-        self.ocr = PaddleOCR(
-            use_angle_cls=True, lang="en", use_gpu=self.use_gpu, show_log=False
-        )
 
         self.csv_file = "output.csv"
         self.json_file = "output.json"
@@ -255,36 +254,61 @@ class VideoProcessor:
 
     def _decide_worker_count(self, requested_max=None):
         cpu_count = multiprocessing.cpu_count()
-        max_by_cpu = min(4, cpu_count)
 
         if not self.use_gpu:
-            return requested_max or max_by_cpu
+            return min(requested_max or cpu_count, 4)
 
         free_mb = self._query_gpu_free_mb()
         if free_mb is None:
-            return requested_max or max_by_cpu
+            return min(requested_max or cpu_count, 4)
 
         effective_free = max(0, free_mb - self.GPU_RESERVE_MB)
-        possible = max(1, effective_free // self.gpu_per_ocr_mb)
+        possible = min(4, effective_free // self.gpu_per_ocr_mb)
 
         return min(possible, cpu_count, requested_max or possible or 1)
+
+    def _pick_hwaccel(self):
+        try:
+            _ = subprocess.check_output(["nvidia-smi"], stderr=subprocess.DEVNULL)
+            return "cuda"
+        except Exception:
+            pass
+
+        # Intel iGPU (Linux)
+        if os.path.exists("/dev/dri/renderD128"):
+            return "vaapi"
+
+        # Windows hardware decoding
+        if os.name == "nt":
+            return "dxva2"
+
+        return "none"
 
     def _extract_frames(self, video_file, frames_dir):
         if not os.path.exists(frames_dir):
             os.makedirs(frames_dir)
+
+        hw = self._pick_hwaccel()
+
+        vf_parts = [f"fps={self.frame_fps}"]
+
+        vf = ",".join(vf_parts)
+
+        frame_pattern = os.path.join(frames_dir, f"frame_%06d.{self.FRAME_EXT}")
+
+        cmd = ["ffmpeg", "-y"]
+
+        if hw == "cuda":
+            cmd += ["-hwaccel", "cuda"]
+        elif hw == "vaapi":
+            cmd += ["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128"]
+        elif hw == "dxva2":
+            cmd += ["-hwaccel", "dxva2"]
+
+        cmd += ["-i", video_file, "-vf", vf, "-qscale:v", "3", frame_pattern]
+
         subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                video_file,
-                "-vf",
-                f"fps={self.frame_fps}",
-                os.path.join(frames_dir, "frame_%06d.png"),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
     def _compute_phash(self, path):
@@ -292,7 +316,9 @@ class VideoProcessor:
             return imagehash.phash(img)
 
     def _unique_frames_progressive(self, frames_dir):
-        frames = sorted([f for f in os.listdir(frames_dir) if f.endswith(".png")])
+        frames = sorted(
+            [f for f in os.listdir(frames_dir) if f.endswith(f".{self.FRAME_EXT}")]
+        )
         if not frames:
             return []
 
@@ -358,6 +384,9 @@ class VideoProcessor:
         return email
 
     def _extract_emails_from_frames(self, frames_dir, unique_frames):
+        ocr = PaddleOCR(
+            use_angle_cls=True, lang="en", use_gpu=self.use_gpu, show_log=False
+        )
         results = []
 
         for idx, fname in enumerate(tqdm(unique_frames, desc="Running OCR")):
@@ -369,7 +398,7 @@ class VideoProcessor:
                 img_cv = self._crop_roi(img_cv)
             img_cv = self._keep_dark_regions(img_cv, threshold=250)
 
-            ocr_res = self.ocr.ocr(img_cv, cls=True)
+            ocr_res = ocr.ocr(img_cv, cls=True)
             if not ocr_res or not ocr_res[0]:
                 continue
 
