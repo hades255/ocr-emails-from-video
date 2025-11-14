@@ -199,6 +199,10 @@ class VideoProcessor:
         )
         self.known_domains = known_domains or list(self.KNOWN_DOMAINS)
 
+        self.ocr = PaddleOCR(
+            use_angle_cls=True, lang="en", use_gpu=self.use_gpu, show_log=False
+        )
+
         self.csv_file = "output.csv"
         self.json_file = "output.json"
 
@@ -354,10 +358,6 @@ class VideoProcessor:
         return email
 
     def _extract_emails_from_frames(self, frames_dir, unique_frames):
-        ocr = None
-        ocr = PaddleOCR(
-            use_angle_cls=True, lang="en", use_gpu=self.use_gpu, show_log=False
-        )
         results = []
 
         for idx, fname in enumerate(tqdm(unique_frames, desc="Running OCR")):
@@ -369,7 +369,7 @@ class VideoProcessor:
                 img_cv = self._crop_roi(img_cv)
             img_cv = self._keep_dark_regions(img_cv, threshold=250)
 
-            ocr_res = ocr.ocr(img_cv, cls=True)
+            ocr_res = self.ocr.ocr(img_cv, cls=True)
             if not ocr_res or not ocr_res[0]:
                 continue
 
@@ -581,6 +581,8 @@ class VideoProcessor:
                     str(start),
                     "-t",
                     str(segment_seconds),
+                    "-c",
+                    "copy",
                     seg_path,
                 ],
                 check=True,
