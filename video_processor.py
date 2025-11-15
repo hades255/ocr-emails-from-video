@@ -131,6 +131,8 @@ class VideoProcessor:
 
     IS_LOWER_CASE = False
 
+    DEFAULT_DOWNSCALE_HEIGHT = 1440
+
     FRAME_EXT = "jpg"
 
     HIGH_CONFIDENCE_REPLACEMENTS = {
@@ -177,6 +179,7 @@ class VideoProcessor:
         gpu_per_ocr_mb: int = None,
         high_confidence_replacements: dict = None,
         known_domains: list = None,
+        downscale_height=None,
     ):
         print("Initializing VideoProcessor...", datetime.datetime.now())
         self.video_path = video_path
@@ -196,6 +199,8 @@ class VideoProcessor:
             max_segment_seconds or self.DEFAULT_MAX_SEGMENT_SECONDS
         )
         self.gpu_per_ocr_mb = gpu_per_ocr_mb or self.DEFAULT_GPU_PER_OCR_MB
+
+        self.downscale_height = downscale_height or self.DEFAULT_DOWNSCALE_HEIGHT
 
         self.high_confidence_replacements = (
             high_confidence_replacements or self.HIGH_CONFIDENCE_REPLACEMENTS
@@ -291,6 +296,8 @@ class VideoProcessor:
         hw = self._pick_hwaccel()
 
         vf_parts = [f"fps={self.frame_fps}"]
+        if self.downscale_height:
+            vf_parts.append(f"scale=-1:{self.downscale_height}")
 
         vf = ",".join(vf_parts)
 
@@ -641,6 +648,7 @@ class VideoProcessor:
             gpu_per_ocr_mb=self.gpu_per_ocr_mb,
             high_confidence_replacements=self.high_confidence_replacements,
             known_domains=self.known_domains,
+            downscale_height=self.downscale_height,
         )
 
         seg_proc._extract_frames(segment_path, seg_frames_dir)
