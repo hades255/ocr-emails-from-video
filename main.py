@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     processor = VideoProcessor(
         video_path=video_path,
-        frame_fps=1,
+        frame_fps=10,
         use_gpu=True,
         is_lower_case=True,
         roi=None,
