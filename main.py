@@ -3,7 +3,7 @@ import sys
 from video_processor import VideoProcessor
 
 if __name__ == "__main__":
-    video_name = sys.argv[1] if len(sys.argv) > 1 else "video.mp4"
+    video_name = sys.argv[1] if len(sys.argv) > 1 else "20251107_165815.mp4"
     video_path = os.path.join(os.getcwd(), video_name)
 
     if not os.path.exists(video_path):
